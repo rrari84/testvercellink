@@ -1,0 +1,275 @@
+/** @import must precede all other statements */
+/* SF Pro font stack - optimized for all platforms */
+
+/* SF Pro font fallback declarations */
+@font-face {
+  font-family: 'SF Pro Display';
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  src: local('SF Pro Display Light'), local('-apple-system'), local('BlinkMacSystemFont');
+}
+
+@font-face {
+  font-family: 'SF Pro Display';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: local('SF Pro Display Regular'), local('-apple-system'), local('BlinkMacSystemFont');
+}
+
+@font-face {
+  font-family: 'SF Pro Display';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: local('SF Pro Display Medium'), local('-apple-system'), local('BlinkMacSystemFont');
+}
+
+@font-face {
+  font-family: 'SF Pro Display';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: local('SF Pro Display Semibold'), local('-apple-system'), local('BlinkMacSystemFont');
+}
+
+@font-face {
+  font-family: 'SF Pro Display';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: local('SF Pro Display Bold'), local('-apple-system'), local('BlinkMacSystemFont');
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /**
+   * Tailwind CSS theme
+   * tailwind.config.ts expects the following color variables to be expressed as HSL values.
+   * A different format will require also updating the theme in tailwind.config.ts.
+  */
+  :root {
+    /* Professional CEX Dark Theme */
+    --background: 218 20% 4%;
+    --foreground: 210 20% 92%;
+
+    --card: 218 18% 6%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 218 18% 8%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 166 100% 20%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 218 15% 8%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 218 15% 8%;
+    --muted-foreground: 215 15% 58%;
+
+    --accent: 218 15% 10%;
+    --accent-foreground: 210 20% 92%;
+
+    --destructive: 0 80% 58%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 218 15% 12%;
+    --input: 218 15% 8%;
+    --ring: 166 100% 20%;
+
+    --radius: 0.25rem;
+
+    /* Professional trading colors - Custom Teal #00674F */
+    --buy-green: 166 100% 20%;
+    --positive-green: 142 76% 45%;
+    --sell-red: 0 80% 58%;
+    --chart-bg: 218 20% 4%;
+    --panel-bg: 218 18% 6%;
+    --hover-bg: 218 15% 10%;
+    --surface: 218 15% 8%;
+    --surface-hover: 218 15% 10%;
+
+    --sidebar-background: 218 18% 6%;
+    --sidebar-foreground: 210 20% 88%;
+    --sidebar-primary: 166 100% 20%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 218 15% 10%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 218 15% 12%;
+    --sidebar-ring: 166 100% 20%;
+  }
+
+  .dark {
+    /* Same as default since we're using dark theme by default */
+    --background: 216 15% 8%;
+    --foreground: 210 40% 95%;
+
+    --card: 216 15% 10%;
+    --card-foreground: 210 40% 95%;
+
+    --popover: 216 15% 12%;
+    --popover-foreground: 210 40% 95%;
+
+    --primary: 166 100% 20%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 216 15% 15%;
+    --secondary-foreground: 210 40% 95%;
+
+    --muted: 216 15% 12%;
+    --muted-foreground: 215 16% 65%;
+
+    --accent: 216 15% 15%;
+    --accent-foreground: 210 40% 95%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 216 15% 18%;
+    --input: 216 15% 15%;
+    --ring: 166 100% 20%;
+
+    --buy-green: 166 100% 20%;
+    --positive-green: 142 76% 45%;
+    --sell-red: 0 84% 60%;
+    --chart-bg: 216 15% 8%;
+    --panel-bg: 216 15% 10%;
+    --hover-bg: 216 15% 15%;
+
+    --sidebar-background: 216 15% 10%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 166 100% 20%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 216 15% 15%;
+    --sidebar-accent-foreground: 210 40% 95%;
+    --sidebar-border: 216 15% 18%;
+    --sidebar-ring: 166 100% 20%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'tnum' 1; /* Tabular numbers for better data alignment */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* SF Pro font optimizations */
+  * {
+    font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  /* Professional typography */
+  .font-mono {
+    font-family: 'SF Mono', ui-monospace, SFMono-Regular, Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Inter-specific weight classes */
+  .font-light {
+    font-weight: 300;
+  }
+
+  .font-normal {
+    font-weight: 400;
+  }
+
+  .font-medium {
+    font-weight: 500;
+  }
+
+  .font-semibold {
+    font-weight: 600;
+  }
+
+  .font-bold {
+    font-weight: 700;
+  }
+
+  .font-extrabold {
+    font-weight: 800;
+  }
+
+  /* Professional trading utilities */
+  .chart-bg {
+    background: hsl(var(--chart-bg));
+  }
+
+  .panel-bg {
+    background: hsl(var(--panel-bg));
+  }
+
+  .surface {
+    background: hsl(var(--surface));
+  }
+
+  .surface-hover:hover {
+    background: hsl(var(--surface-hover));
+  }
+
+  .buy-color {
+    color: hsl(var(--buy-green));
+  }
+
+  .positive-color {
+    color: hsl(var(--positive-green));
+  }
+
+  .sell-color {
+    color: hsl(var(--sell-red));
+  }
+
+  .buy-bg {
+    background: hsl(var(--buy-green));
+  }
+
+  .positive-bg {
+    background: hsl(var(--positive-green));
+  }
+
+  .sell-bg {
+    background: hsl(var(--sell-red));
+  }
+
+  /* Subtle separator lines */
+  .separator {
+    border-color: hsl(var(--border));
+  }
+
+  /* Data table styling */
+  .data-row {
+    @apply border-b border-border/20 hover:bg-surface transition-colors;
+  }
+
+  /* Minimal scrollbar */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 2px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.3);
+  }
+}
