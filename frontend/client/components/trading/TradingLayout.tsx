@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Header } from './Header';
 import { TradingChart } from './TradingChart';
-import { TradingPanel } from './TradingPanel';
+import { PasskeyTradingPanel } from './PasskeyTradingPanel';
 import { PasskeyAuth } from './PasskeyAuth';
 import { VaultPanel } from './VaultPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -62,7 +62,7 @@ export function TradingLayout() {
 
             <div className="h-[calc(100%-40px)] overflow-y-auto">
               <TabsContent value="trading" className="mt-0 space-y-6">
-                <TradingPanel />
+                <PasskeyTradingPanel />
               </TabsContent>
 
               <TabsContent value="vault" className="mt-0">

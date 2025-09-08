@@ -7,6 +7,13 @@
 
     <!-- Using SF Pro system fonts - no external font loading needed -->
     <meta name="description" content="Professional trading platform with SF Pro typography">
+    
+    <!-- Fix for Stellar Wallet Kit global dependency -->
+    <script>
+      if (typeof global === 'undefined') {
+        window.global = window;
+      }
+    </script>
   </head>
 
   <body>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Header } from '@/components/trading/Header';
-import { TradingPanel } from '@/components/trading/TradingPanel';
+import { PasskeyTradingPanel } from '@/components/trading/PasskeyTradingPanel';
 import { PasskeyAuth } from '@/components/trading/PasskeyAuth';
 import { VaultPanel } from '@/components/trading/VaultPanel'; // You'll need to create this
 import { TradingChart } from '@/components/trading/TradingChart';
@@ -121,7 +121,7 @@ export default function Index() {
 
               <div className="h-[calc(100%-40px)]">
                 <TabsContent value="trading" className="mt-0 space-y-3">
-                  <TradingPanel />
+                  <PasskeyTradingPanel />
                 </TabsContent>
 
                 <TabsContent value="vault" className="mt-0">

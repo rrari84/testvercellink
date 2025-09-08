@@ -1,0 +1,1113 @@
+import { 
+  Contract, 
+  TransactionBuilder, 
+  Networks, 
+  BASE_FEE, 
+  Address, 
+  xdr,
+  Keypair,
+  Operation,
+  Asset,
+  nativeToScVal,
+  scValToNative,
+  Account
+} from '@stellar/stellar-sdk';
+import { rpc } from "@stellar/stellar-sdk";
+import { Buffer } from 'buffer';
+
+export interface PasskeyAuth {
+  isAuthenticated: boolean;
+  userId?: string;
+  publicKey?: string;
+  stellarPublicKey?: string;
+  contractId?: string;
+}
+
+export interface AuthResult {
+  success: boolean;
+  userId?: string;
+  publicKey?: string;
+  stellarPublicKey?: string;
+  contractId?: string;
+  error?: string;
+}
+
+export interface ContractAddresses {
+  kaleToken: string;
+  oracle: string;
+  trading: string;
+  vault: string;
+  shareToken: string;
+}
+
+export class PasskeyService {
+  private rpcUrl: string;
+  private networkPassphrase: string;
+  private server: rpc.Server;
+  private contracts: ContractAddresses;
+  private authenticationInProgress = false;
+  private lastAuthResult: AuthResult | null = null;
+
+  constructor(contracts?: ContractAddresses) {
+    this.rpcUrl = 'https://soroban-testnet.stellar.org';
+    this.networkPassphrase = Networks.TESTNET;
+    this.server = new rpc.Server(this.rpcUrl);
+    
+    // Use provided contract addresses from your deployment
+    this.contracts = contracts || {
+      kaleToken: 'CAAVU2UQJLMZ3GUZFM56KVNHLPA3ZSSNR4VP2U53YBXFD2GI3QLIVHZZ',
+      oracle: 'CCQFLFIIP6VOTVWU3ENWZGRITY3UNAZT3SRPDF27JEAXNEVIGR3OA3IQ',
+      trading: 'CACR6U34NZEAROL7EEH22HHLEE6URKE43FB23CLLSOC3XZCMXUNM5Z2I',
+      vault: 'CCYALTIG7PMV7HSKXVWNBEKDCI6ED2N7SS2FNP322AIH35GFMVSMHWEG',
+      shareToken: 'CCPU63KOWDVITW442XCC6CBVMINZME4X2JD6IDAGNNS3ILRX7HVXVHBV'
+    };
+  }
+
+  // Check if WebAuthn is supported
+  public static isSupported(): boolean {
+    return !!(
+      typeof window !== 'undefined' &&
+      window.PublicKeyCredential &&
+      window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
+    );
+  }
+
+  // Generate a Stellar keypair from passkey credential
+  private async generateStellarKeypair(credentialId: string, userId: string): Promise<Keypair> {
+    const seedInput = credentialId + userId;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(seedInput);
+    
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const seed = new Uint8Array(hashBuffer);
+    const seedBuffer = Buffer.from(seed);
+    
+    return Keypair.fromRawEd25519Seed(seedBuffer);
+  }
+
+  // Register a new passkey and create associated Stellar account
+  async register(username?: string): Promise<AuthResult> {
+    try {
+      if (!PasskeyService.isSupported()) {
+        throw new Error('WebAuthn is not supported on this device');
+      }
+
+      console.log('Starting passkey registration...');
+
+      const userId = username || `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+      const createCredentialOptions: CredentialCreationOptions = {
+        publicKey: {
+          rp: {
+            name: 'TradeX',
+            id: window.location.hostname,
+          },
+          user: {
+            id: new TextEncoder().encode(userId),
+            name: userId,
+            displayName: userId,
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: 'public-key' },
+            { alg: -257, type: 'public-key' },
+          ],
+          challenge: challenge,
+          timeout: 60000,
+          attestation: 'direct',
+          authenticatorSelection: {
+            authenticatorAttachment: 'platform',
+            userVerification: 'required',
+            residentKey: 'preferred',
+          },
+        },
+      };
+
+      const credential = await navigator.credentials.create(createCredentialOptions) as PublicKeyCredential;
+      
+      if (!credential) {
+        throw new Error('Failed to create credential');
+      }
+
+      const response = credential.response as AuthenticatorAttestationResponse;
+      const publicKeyBuffer = response.getPublicKey();
+      
+      if (!publicKeyBuffer) {
+        throw new Error('Failed to extract public key');
+      }
+
+      const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyBuffer)));
+      const credentialId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+
+      const stellarKeypair = await this.generateStellarKeypair(credentialId, userId);
+      const stellarPublicKey = stellarKeypair.publicKey();
+
+      console.log('Passkey created successfully:', {
+        userId,
+        credentialId,
+        stellarPublicKey
+      });
+
+      const authData = {
+        userId,
+        credentialId,
+        publicKey: publicKeyBase64,
+        stellarPublicKey,
+        stellarSecret: stellarKeypair.secret(),
+        contractId: this.contracts.trading,
+        timestamp: Date.now()
+      };
+
+      localStorage.setItem('passkeyAuth', JSON.stringify(authData));
+
+      // Create and fund Stellar account
+      await this.createAndFundStellarAccount(stellarKeypair);
+
+      return {
+        success: true,
+        userId,
+        publicKey: publicKeyBase64,
+        stellarPublicKey,
+        contractId: this.contracts.trading
+      };
+
+    } catch (error) {
+      console.error('Passkey registration failed:', error);
+      
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          return { success: false, error: 'Registration was cancelled or not allowed' };
+        } else if (error.name === 'NotSupportedError') {
+          return { success: false, error: 'Passkeys are not supported on this device' };
+        }
+      }
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Registration failed'
+      };
+    }
+  }
+
+  // Create and fund a Stellar account
+  private async createAndFundStellarAccount(keypair: Keypair): Promise<void> {
+    try {
+      // Check if account already exists
+      try {
+        await this.server.getAccount(keypair.publicKey());
+        console.log('Account already exists:', keypair.publicKey());
+        return;
+      } catch (error) {
+        // Account doesn't exist, need to create it
+      }
+
+      console.log('Funding account with Friendbot...');
+      const response = await fetch(
+        `https://friendbot.stellar.org?addr=${keypair.publicKey()}`
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Friendbot failed: ${response.status} - ${errorText}`);
+      }
+
+      console.log('Account funded successfully:', keypair.publicKey());
+      
+      // Wait for account to be available and verify
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const account = await this.server.getAccount(keypair.publicKey());
+      console.log('Account verified, sequence:', account.sequenceNumber());
+
+    } catch (error) {
+      console.error('Failed to create/fund Stellar account:', error);
+      throw error;
+    }
+  }
+
+  // Authenticate using existing passkey
+  async authenticate(): Promise<AuthResult> {
+    if (this.authenticationInProgress && this.lastAuthResult) {
+      return this.lastAuthResult;
+    }
+
+    const authStatus = this.getAuthStatus();
+    if (authStatus.isAuthenticated) {
+      return {
+        success: true,
+        userId: authStatus.userId,
+        publicKey: authStatus.publicKey,
+        stellarPublicKey: authStatus.stellarPublicKey,
+        contractId: authStatus.contractId
+      };
+    }
+
+    if (this.authenticationInProgress) {
+      throw new Error('Authentication already in progress');
+    }
+
+    this.authenticationInProgress = true;
+
+    try {
+      if (!PasskeyService.isSupported()) {
+        throw new Error('WebAuthn is not supported on this device');
+      }
+
+      console.log('Starting passkey authentication...');
+
+      const storedAuth = localStorage.getItem('passkeyAuth');
+      if (!storedAuth) {
+        throw new Error('No passkey found. Please register first.');
+      }
+
+      const authData = JSON.parse(storedAuth);
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+      const getCredentialOptions: CredentialRequestOptions = {
+        publicKey: {
+          challenge: challenge,
+          timeout: 60000,
+          userVerification: 'required',
+          allowCredentials: [{
+            id: Uint8Array.from(atob(authData.credentialId), c => c.charCodeAt(0)),
+            type: 'public-key',
+            transports: ['internal', 'hybrid']
+          }]
+        },
+      };
+
+      const credential = await navigator.credentials.get(getCredentialOptions) as PublicKeyCredential;
+      
+      if (!credential) {
+        throw new Error('Authentication failed');
+      }
+
+      console.log('Authentication successful');
+
+      authData.lastAuth = Date.now();
+      localStorage.setItem('passkeyAuth', JSON.stringify(authData));
+
+      this.lastAuthResult = {
+        success: true,
+        userId: authData.userId,
+        publicKey: authData.publicKey,
+        stellarPublicKey: authData.stellarPublicKey,
+        contractId: authData.contractId
+      };
+
+      return this.lastAuthResult;
+
+    } catch (error) {
+      console.error('Passkey authentication failed:', error);
+      
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          return { success: false, error: 'Authentication was cancelled or not allowed' };
+        } else if (error.name === 'InvalidStateError') {
+          return { success: false, error: 'Passkey not found or invalid' };
+        }
+      }
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Authentication failed'
+      };
+    } finally {
+      this.authenticationInProgress = false;
+    }
+  }
+
+// Add this test to see if the contract is working at all
+async testContractExists(): Promise<void> {
+  try {
+    console.log('🧪 Testing if trading contract exists and responds...');
+    
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0'
+    );
+    
+    const contract = new Contract(this.contracts.trading);
+    
+    // Try to call a non-existent function to see the contract's response
+    const tx = new TransactionBuilder(dummyAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call('nonexistent_function_test_12345'))
+      .setTimeout(30)
+      .build();
+
+    const result = await this.server.simulateTransaction(tx);
+    
+    if (rpc.Api.isSimulationError(result)) {
+      console.log('Contract response to invalid function:', result.error);
+      
+      // If we get a "non-existent function" error, the contract exists
+      if (result.error.includes('non-existent contract function')) {
+        console.log('✅ Contract exists and is responding');
+        console.log('❌ But it has no trading functions');
+        console.log('🤔 This suggests the deployed contract is not a trading contract');
+      }
+    }
+    
+  } catch (error) {
+    console.error('Contract test failed:', error);
+  }
+}
+
+  // Add this method to PasskeyService.ts
+async debugTradingContractFunctions(): Promise<void> {
+  console.log('🔍 Debugging trading contract functions...');
+  
+  const dummyAccount = new Account(
+    'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+    '0'
+  );
+
+  // Common trading function names to try
+  const functionNames = [
+    'open_long', 'open_short', 'long', 'short', 'buy', 'sell',
+    'open_position', 'place_order', 'submit_order', 'create_order',
+    'trade', 'execute_trade', 'add_position', 'new_position',
+    'open', 'close', 'enter_position', 'exit_position'
+  ];
+
+  const tradingContract = new Contract(this.contracts.trading);
+  
+  for (const funcName of functionNames) {
+    try {
+      const tx = new TransactionBuilder(dummyAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(tradingContract.call(funcName))
+        .setTimeout(30)
+        .build();
+
+      const result = await this.server.simulateTransaction(tx);
+      
+      if (rpc.Api.isSimulationSuccess(result)) {
+        console.log(`✅ ${funcName}() - EXISTS and works without parameters`);
+      } else if (rpc.Api.isSimulationError(result)) {
+        const error = result.error;
+        if (error.includes('function not found') || error.includes('non-existent contract function')) {
+          console.log(`❌ ${funcName}() - DOES NOT EXIST`);
+        } else {
+          console.log(`⚠️  ${funcName}() - EXISTS but needs parameters:`, error);
+        }
+      }
+    } catch (error) {
+      console.log(`❌ ${funcName}() - ERROR:`, error);
+    }
+  }
+}
+
+async executeTrade(
+  market: string,
+  isLong: boolean,
+  amount: string,
+  leverage: number
+): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+  try {
+    console.log('🔄 Starting trade execution:', { market, isLong, amount, leverage });
+    
+    // Validate inputs
+    if (!market || !amount || parseFloat(amount) <= 0) {
+      return { success: false, error: 'Invalid trade parameters' };
+    }
+
+    if (leverage < 1 || leverage > 100) {
+      return { success: false, error: 'Leverage must be between 1x and 100x' };
+    }
+
+    const authResult = await this.authenticate();
+    if (!authResult.success) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const storedAuth = localStorage.getItem('passkeyAuth');
+    const authData = JSON.parse(storedAuth!);
+    const userKeypair = Keypair.fromSecret(authData.stellarSecret);
+    
+    console.log('📡 Getting account info for:', userKeypair.publicKey());
+    const account = await this.server.getAccount(userKeypair.publicKey());
+    console.log('✅ Account sequence:', account.sequenceNumber());
+    
+    const contract = new Contract(this.contracts.trading);
+    
+    // Convert amount to proper scale (7 decimals)
+    const scaledAmount = BigInt(Math.floor(parseFloat(amount) * 10**7));
+    
+    // Calculate notional size based on leverage
+    const notionalSize = scaledAmount * BigInt(leverage);
+    
+    // Create the asset based on market
+    let asset;
+    if (market === 'XLM') {
+      // For XLM, use the Stellar native asset or specific token address
+      asset = nativeToScVal({ tag: 'Other', values: [market] }, { type: 'enum' });
+    } else {
+      // For other assets, use the Other variant with symbol
+      asset = nativeToScVal({ tag: 'Other', values: [market] }, { type: 'enum' });
+    }
+    
+    // Get current price for entry price (you might want to get this from oracle)
+    const entryPrice = BigInt(Math.floor(0.50 * 10**7)); // XLM price from your config
+    
+    console.log('📝 Building create_position transaction...');
+    
+    const transaction = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'create_position',
+          nativeToScVal(Address.fromString(userKeypair.publicKey()), {type: 'address'}),
+          asset,
+          nativeToScVal(scaledAmount, {type: 'i128'}),
+          nativeToScVal(notionalSize, {type: 'i128'}),
+          nativeToScVal(isLong, {type: 'bool'}),
+          nativeToScVal(entryPrice, {type: 'i128'})
+        )
+      )
+      .setTimeout(30)
+      .build();
+    
+    // Test the transaction with simulation first
+    const simulationResult = await this.server.simulateTransaction(transaction);
+    
+    if (rpc.Api.isSimulationError(simulationResult)) {
+      console.log('❌ Simulation failed:', simulationResult.error);
+      return { 
+        success: false, 
+        error: `Transaction simulation failed: ${simulationResult.error}` 
+      };
+    }
+    
+    console.log('✅ Simulation successful, proceeding with transaction');
+    console.log('🔏 Signing transaction...');
+    transaction.sign(userKeypair);
+    
+    console.log('📤 Submitting to Stellar testnet...');
+    const result = await this.server.sendTransaction(transaction);
+    
+    console.log('📊 Transaction result:', result.status, result.hash);
+    
+    const status = result.status as string;
+    if (status === "SUCCESS") {
+      return { success: true, transactionHash: result.hash };
+    } else if (result.status === "PENDING") {
+      // Poll for completion
+      console.log('⏳ Transaction pending, polling for completion...');
+      
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+          const txResult = await this.server.getTransaction(result.hash);
+          if (txResult.status === "SUCCESS") {
+            return { success: true, transactionHash: result.hash };
+          } else if (txResult.status === "FAILED") {
+            return { success: false, error: 'Transaction failed after submission' };
+          }
+        } catch (error) {
+          // Continue polling
+        }
+      }
+      
+      return { 
+        success: false, 
+        error: 'Transaction is taking longer than expected. Check transaction status manually.' 
+      };
+    } else {
+      return { 
+        success: false, 
+        error: `Transaction ${result.status.toLowerCase()}` 
+      };
+    }
+
+  } catch (error) {
+    console.error('❌ Trade execution failed:', error);
+    
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      if (message.includes('insufficient balance') || message.includes('insufficient funds')) {
+        return { success: false, error: 'Insufficient KALE balance for this trade' };
+      } else if (message.includes('maxpositions')) {
+        return { success: false, error: 'Maximum number of positions reached' };
+      } else if (message.includes('invalidconfig')) {
+        return { success: false, error: 'Invalid trading configuration' };
+      }
+    }
+    
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Trade failed'
+    };
+  }
+}
+
+  // Get KALE balance
+  async getKaleBalance(): Promise<{ success: boolean; balance?: string; error?: string }> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.success || !authResult.stellarPublicKey) {
+        return { success: false, error: 'Authentication required' };
+      }
+
+      const contract = new Contract(this.contracts.kaleToken);
+      const userAddress = Address.fromString(authResult.stellarPublicKey);
+      
+      // Create a dummy account for simulation
+      const dummyAccount = new Account(
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        '0'
+      );
+      
+      const transaction = new TransactionBuilder(dummyAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          contract.call(
+            'balance',
+            nativeToScVal(userAddress, {type: 'address'})
+          )
+        )
+        .setTimeout(30)
+        .build();
+
+      const result = await this.server.simulateTransaction(transaction);
+      
+      if (rpc.Api.isSimulationSuccess(result) && result.result?.retval) {
+        const balanceScVal = result.result.retval;
+        const balance = scValToNative(balanceScVal);
+        
+        // Convert from 7 decimal places to readable format
+        const balanceAmount = (Number(balance) / 10**7).toString();
+        
+        return { success: true, balance: balanceAmount };
+      } else {
+        // Return 0 for new accounts or accounts without KALE
+        return { success: true, balance: '0' };
+      }
+
+    } catch (error) {
+      console.error('Failed to get KALE balance:', error);
+      return { success: true, balance: '0' };
+    }
+  }
+
+  // Close a position using the submit function
+async closePositionRequest(positionId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const authResult = await this.authenticate();
+    if (!authResult.success) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const storedAuth = localStorage.getItem('passkeyAuth');
+    const authData = JSON.parse(storedAuth!);
+    const userKeypair = Keypair.fromSecret(authData.stellarSecret);
+    
+    const account = await this.server.getAccount(userKeypair.publicKey());
+    const contract = new Contract(this.contracts.trading);
+    
+    // Create close request
+    const closeRequest = nativeToScVal({
+      action: { tag: 'Close' },
+      data: null,
+      position: positionId
+    });
+    
+    const transaction = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'submit',
+          nativeToScVal(Address.fromString(userKeypair.publicKey()), {type: 'address'}),
+          nativeToScVal([closeRequest], {type: 'vec'})
+        )
+      )
+      .setTimeout(30)
+      .build();
+    
+    transaction.sign(userKeypair);
+    const result = await this.server.sendTransaction(transaction);
+    const status = result.status as string;
+    
+    return { success: status === "SUCCESS" };
+    
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Close failed' };
+  }
+}
+
+  // Get prices from oracle
+  async getPrices(): Promise<{ success: boolean; prices?: any; error?: string }> {
+    try {
+      const contract = new Contract(this.contracts.oracle);
+      
+      const dummyAccount = new Account(
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        '0'
+      );
+      
+      // Try to get supported assets first
+      try {
+        const assetsTransaction = new TransactionBuilder(dummyAccount, {
+          fee: BASE_FEE,
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(contract.call('assets'))
+          .setTimeout(30)
+          .build();
+
+        const assetsResult = await this.server.simulateTransaction(assetsTransaction);
+        
+        if (rpc.Api.isSimulationSuccess(assetsResult)) {
+          const availableAssets = scValToNative(assetsResult.result.retval);
+          console.log('Available oracle assets:', availableAssets);
+          
+          // Get prices for available assets
+          const prices: any = {};
+          
+          for (const asset of availableAssets) {
+            try {
+              const priceTransaction = new TransactionBuilder(dummyAccount, {
+                fee: BASE_FEE,
+                networkPassphrase: this.networkPassphrase,
+              })
+                .addOperation(contract.call('lastprice', nativeToScVal(asset)))
+                .setTimeout(30)
+                .build();
+
+              const priceResult = await this.server.simulateTransaction(priceTransaction);
+              
+              if (rpc.Api.isSimulationSuccess(priceResult)) {
+                const priceData = scValToNative(priceResult.result.retval);
+                
+                if (priceData && priceData.price !== undefined) {
+                  const assetName = asset.tag === 'Other' ? asset.values[0] : 'Unknown';
+                  prices[assetName] = {
+                    price: Number(priceData.price) / 10**7,
+                    timestamp: priceData.timestamp
+                  };
+                }
+              }
+            } catch (error) {
+              console.log(`Failed to get price for asset:`, asset);
+            }
+          }
+          
+          if (Object.keys(prices).length > 0) {
+            return { success: true, prices };
+          }
+        }
+      } catch (error) {
+        console.error('Failed to get oracle assets:', error);
+      }
+
+      // Fallback: return mock data based on your deployment config
+      console.log('Using fallback price data from deployment config');
+      return {
+        success: true,
+        prices: {
+          KALE: { price: 1.0, timestamp: Date.now() }, // From deployment: "kalePrice": "1.0"
+          XLM: { price: 0.50, timestamp: Date.now() }   // From deployment: "xlmPrice": "0.50"
+        }
+      };
+
+    } catch (error) {
+      console.error('Failed to get prices:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Price query failed'
+      };
+    }
+  }
+
+  // Check current authentication status
+  getAuthStatus(): PasskeyAuth {
+    try {
+      const storedAuth = localStorage.getItem('passkeyAuth');
+      if (!storedAuth) {
+        return { isAuthenticated: false };
+      }
+
+      const authData = JSON.parse(storedAuth);
+      
+      // Check if authentication is recent (within 24 hours)
+      const maxAge = 24 * 60 * 60 * 1000;
+      const isRecent = authData.lastAuth && (Date.now() - authData.lastAuth) < maxAge;
+
+      return {
+        isAuthenticated: isRecent,
+        userId: authData.userId,
+        publicKey: authData.publicKey,
+        stellarPublicKey: authData.stellarPublicKey,
+        contractId: authData.contractId
+      };
+
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      return { isAuthenticated: false };
+    }
+  }
+
+  // Clear authentication
+  clearAuth(): void {
+    localStorage.removeItem('passkeyAuth');
+    this.lastAuthResult = null;
+    this.authenticationInProgress = false;
+    console.log('Passkey authentication cleared');
+  }
+
+// Try to see if the user needs to be registered first
+// Add this to PasskeyService.ts
+async checkUserRegistration(): Promise<void> {
+  try {
+    console.log('=== USER REGISTRATION CHECK STARTED ===');
+    
+    const authResult = await this.authenticate();
+    if (!authResult.success) {
+      console.log('Authentication failed');
+      return;
+    }
+
+    const storedAuth = localStorage.getItem('passkeyAuth');
+    if (!storedAuth) {
+      console.log('No stored auth data');
+      return;
+    }
+    
+    const authData = JSON.parse(storedAuth);
+    const userKeypair = Keypair.fromSecret(authData.stellarSecret);
+    
+    console.log('User Details:');
+    console.log('- User address:', userKeypair.publicKey());
+    console.log('- Contract owner: GBBM2QYEHB2OXJXSPSCE46Y6VQ2C2DPOU6OKYCDGCGZQRSAAJT62UXVF');
+    console.log('- User is owner:', userKeypair.publicKey() === 'GBBM2QYEHB2OXJXSPSCE46Y6VQ2C2DPOU6OKYCDGCGZQRSAAJT62UXVF');
+    
+    console.log('=== USER REGISTRATION CHECK COMPLETE ===');
+    
+  } catch (error) {
+    console.error('User registration check failed:', error);
+  }
+}
+
+async checkContractInitialization(): Promise<void> {
+  try {
+    console.log('🔍 Checking contract initialization...');
+    
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0'
+    );
+    
+    const contract = new Contract(this.contracts.trading);
+    
+    // Check if contract has an owner (indicates initialization)
+    const ownerTx = new TransactionBuilder(dummyAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call('get_owner'))
+      .setTimeout(30)
+      .build();
+
+    const ownerResult = await this.server.simulateTransaction(ownerTx);
+    
+    if (rpc.Api.isSimulationSuccess(ownerResult)) {
+      const owner = scValToNative(ownerResult.result.retval);
+      console.log('✅ Contract owner:', owner);
+    } else {
+      console.log('❌ Contract not initialized or no owner set');
+      console.log('Error:', ownerResult.error);
+    }
+    
+  } catch (error) {
+    console.error('Contract initialization check failed:', error);
+  }
+}
+
+// 2. Check if XLM market is configured
+async checkMarketConfiguration(): Promise<void> {
+  try {
+    console.log('🏪 Checking XLM market configuration...');
+    
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0'
+    );
+    
+    const contract = new Contract(this.contracts.trading);
+    
+    // Try to get market data for XLM
+    const xlmAsset = nativeToScVal({ tag: 'Other', values: ['XLM'] }, { type: 'enum' });
+    
+    // This would require a function to get market config - let's try a different approach
+    // Check if we can call set_market to see if it's configured
+    const setMarketTx = new TransactionBuilder(dummyAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call('set_market', xlmAsset))
+      .setTimeout(30)
+      .build();
+
+    const setMarketResult = await this.server.simulateTransaction(setMarketTx);
+    
+    if (rpc.Api.isSimulationSuccess(setMarketResult)) {
+      console.log('✅ XLM market can be set');
+    } else {
+      console.log('❌ XLM market configuration issue:', setMarketResult.error);
+    }
+    
+  } catch (error) {
+    console.error('Market configuration check failed:', error);
+  }
+}
+
+// 3. Use the correct submit function instead of create_position
+async executeTradeViaSubmit(
+  market: string,
+  isLong: boolean,
+  amount: string,
+  leverage: number
+): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+  try {
+    console.log('🔄 Executing trade via submit function:', { market, isLong, amount, leverage });
+    
+    const authResult = await this.authenticate();
+    if (!authResult.success) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const storedAuth = localStorage.getItem('passkeyAuth');
+    const authData = JSON.parse(storedAuth!);
+    const userKeypair = Keypair.fromSecret(authData.stellarSecret);
+    
+    const account = await this.server.getAccount(userKeypair.publicKey());
+    const contract = new Contract(this.contracts.trading);
+    
+    // Convert amount to proper scale (7 decimals)
+    const scaledAmount = BigInt(Math.floor(parseFloat(amount) * 10**7));
+    const notionalSize = scaledAmount * BigInt(leverage);
+    
+    // Create asset
+    const asset = nativeToScVal({ tag: 'Other', values: [market] }, { type: 'enum' });
+    
+    // Get current price for entry price
+    const entryPrice = BigInt(Math.floor(0.50 * 10**7)); // XLM price
+    
+    // Create a request to open a position using the submit function
+    // Based on the contract interface, we need to create a Request struct
+    const openPositionRequest = nativeToScVal({
+      action: nativeToScVal(1, { type: 'u32' }), // Fill = 1 (closest to opening position)
+      data: nativeToScVal(entryPrice, { type: 'i128' }), // Entry price as data
+      position: nativeToScVal(0, { type: 'u32' }) // New position, so ID 0
+    });
+    
+    console.log('📝 Building submit transaction with request...');
+    
+    const transaction = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'submit',
+          nativeToScVal(Address.fromString(userKeypair.publicKey()), {type: 'address'}),
+          nativeToScVal([openPositionRequest], {type: 'vec'})
+        )
+      )
+      .setTimeout(30)
+      .build();
+    
+    // Test the transaction with simulation first
+    const simulationResult = await this.server.simulateTransaction(transaction);
+    
+    if (rpc.Api.isSimulationError(simulationResult)) {
+      console.log('❌ Submit simulation failed:', simulationResult.error);
+      return { 
+        success: false, 
+        error: `Submit simulation failed: ${simulationResult.error}` 
+      };
+    }
+    
+    console.log('✅ Submit simulation successful');
+    const returnData = scValToNative(simulationResult.result.retval);
+    console.log('Submit result:', returnData);
+    
+    // If simulation is successful, proceed with actual transaction
+    console.log('🔐 Signing transaction...');
+    transaction.sign(userKeypair);
+    
+    console.log('📤 Submitting to Stellar testnet...');
+    const result = await this.server.sendTransaction(transaction);
+    
+    console.log('📊 Transaction result:', result.status, result.hash);
+    
+    const status = result.status as string;
+    if (status === "SUCCESS") {
+      return { success: true, transactionHash: result.hash };
+    } else if (result.status === "PENDING") {
+      // Poll for completion
+      console.log('⏳ Transaction pending, polling for completion...');
+      
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        try {
+          const txResult = await this.server.getTransaction(result.hash);
+          if (txResult.status === "SUCCESS") {
+            return { success: true, transactionHash: result.hash };
+          } else if (txResult.status === "FAILED") {
+            return { success: false, error: 'Transaction failed after submission' };
+          }
+        } catch (error) {
+          // Continue polling
+        }
+      }
+      
+      return { 
+        success: false, 
+        error: 'Transaction is taking longer than expected. Check transaction status manually.' 
+      };
+    } else {
+      return { 
+        success: false, 
+        error: `Transaction ${result.status.toLowerCase()}` 
+      };
+    }
+
+  } catch (error) {
+    console.error('❌ Submit trade execution failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Submit trade failed'
+    };
+  }
+}
+
+// 4. Enhanced debug function to understand the contract state
+async debugContractState(): Promise<void> {
+  try {
+    console.log('🔍 === COMPREHENSIVE CONTRACT DEBUG ===');
+    
+    await this.checkContractInitialization();
+    await this.checkMarketConfiguration();
+    
+    const authResult = await this.authenticate();
+    if (!authResult.success) {
+      console.log('❌ Authentication failed for debug');
+      return;
+    }
+
+    const storedAuth = localStorage.getItem('passkeyAuth');
+    const authData = JSON.parse(storedAuth!);
+    const userKeypair = Keypair.fromSecret(authData.stellarSecret);
+    
+    console.log('👤 User address:', userKeypair.publicKey());
+    console.log('📝 Contract addresses:', this.contracts);
+    
+    // Try to get user positions (if function exists)
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0'
+    );
+    
+    const contract = new Contract(this.contracts.trading);
+    
+    // Test submit with an empty request array to see what happens
+    try {
+      const emptySubmitTx = new TransactionBuilder(dummyAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          contract.call(
+            'submit',
+            nativeToScVal(Address.fromString(userKeypair.publicKey()), {type: 'address'}),
+            nativeToScVal([], {type: 'vec'}) // Empty requests array
+          )
+        )
+        .setTimeout(30)
+        .build();
+
+      const emptySubmitResult = await this.server.simulateTransaction(emptySubmitTx);
+      
+      if (rpc.Api.isSimulationSuccess(emptySubmitResult)) {
+        console.log('✅ Empty submit call successful');
+        const result = scValToNative(emptySubmitResult.result.retval);
+        console.log('Empty submit result:', result);
+      } else {
+        console.log('❌ Empty submit failed:', emptySubmitResult.error);
+      }
+    } catch (error) {
+      console.log('❌ Empty submit error:', error);
+    }
+    
+    console.log('🔍 === DEBUG COMPLETE ===');
+    
+  } catch (error) {
+    console.error('Contract debug failed:', error);
+  }
+}
+
+  // Discover available contract functions
+  private async discoverContractFunctions(): Promise<void> {
+    console.log('🔍 Discovering contract functions...');
+    
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0'
+    );
+
+    // Test trading contract functions
+    const tradingFunctions = [
+      'open_long', 'open_short', 'close_position', 'submit_order',
+      'get_positions', 'get_user_positions', 'place_order', 'long', 'short',
+      'buy', 'sell', 'open_position'
+    ];
+
+    const tradingContract = new Contract(this.contracts.trading);
+    
+    for (const func of tradingFunctions) {
+      try {
+        const tx = new TransactionBuilder(dummyAccount, {
+          fee: BASE_FEE,
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(tradingContract.call(func))
+          .setTimeout(30)
+          .build();
+
+        const result = await this.server.simulateTransaction(tx);
+        
+        if (rpc.Api.isSimulationSuccess(result)) {
+          console.log(`✅ Trading.${func}() - Available`);
+        } else if (rpc.Api.isSimulationError(result)) {
+          const error = result.error;
+          if (!error.includes('function not found') && !error.includes('unknown function')) {
+            console.log(`⚠️  Trading.${func}() - Exists but needs parameters`);
+          }
+        }
+      } catch (error) {
+        // Function doesn't exist or other error
+      }
+    }
+  }
+
+  // Get contract addresses
+  getContractAddresses(): ContractAddresses {
+    return this.contracts;
+  }
+}
+
+export const passkeyService = new PasskeyService();
