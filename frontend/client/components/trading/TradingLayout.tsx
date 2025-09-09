@@ -21,25 +21,54 @@ export function TradingLayout() {
             <TradingChart />
           </div>
           
-          {/* Bottom Stats/Info Section */}
+          {/* Bottom Market Data Section */}
           <div className="h-[40%] bg-panel-bg rounded-lg border border-border p-6">
-            <h3 className="text-lg font-semibold text-foreground mb-4">Market Statistics</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">24h High</p>
-                <p className="text-lg font-mono font-semibold text-foreground">$0.0465</p>
+            <h3 className="text-lg font-semibold text-foreground mb-6">BTC-USD Market Data</h3>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">24H HIGH</p>
+                <p className="text-2xl font-mono font-bold text-green-500">$46,250</p>
+                <p className="text-sm text-green-500">+2.1%</p>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">24h Low</p>
-                <p className="text-lg font-mono font-semibold text-foreground">$0.0441</p>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">24H LOW</p>
+                <p className="text-2xl font-mono font-bold text-red-500">$44,180</p>
+                <p className="text-sm text-red-500">-1.8%</p>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">24h Volume</p>
-                <p className="text-lg font-mono font-semibold text-foreground">1.25M</p>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">24H VOLUME</p>
+                <p className="text-2xl font-mono font-bold text-foreground">$2.45B</p>
+                <p className="text-sm text-green-500">+18.3%</p>
               </div>
-              <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">Market Cap</p>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">OPEN INTEREST</p>
+                <p className="text-2xl font-mono font-bold text-foreground">$125.8M</p>
+                <p className="text-sm text-green-500">+5.2%</p>
+              </div>
+            </div>
+
+            {/* Additional Market Info */}
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">KALE PRICE</p>
+                <p className="text-lg font-mono font-semibold text-foreground">$0.0450</p>
+                <p className="text-sm text-green-500">+1.2%</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">COLLATERAL RATE</p>
+                <p className="text-lg font-mono font-semibold text-foreground">22.22 KALE = $1</p>
+                <p className="text-xs text-muted-foreground">Updated 2s ago</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground uppercase tracking-wide">TOTAL VALUE LOCKED</p>
                 <p className="text-lg font-mono font-semibold text-foreground">$45.2M</p>
+                <p className="text-xs text-muted-foreground">1.003B KALE</p>
               </div>
             </div>
           </div>

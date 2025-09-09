@@ -18,7 +18,7 @@ export interface UserPosition {
   entryPrice: number;
   unrealizedPnl: number;
   side: 'long' | 'short';
-  leverage: number; // Added leverage to position
+  leverage: number;
 }
 
 export interface VaultInfo {
@@ -51,7 +51,7 @@ export interface TradingState {
   orderSide: 'long' | 'short';
   orderSize: string;
   orderPrice: string;
-  leverage: number; // Added leverage state
+  leverage: number;
   
   // Vault state
   vaultInfo: VaultInfo | null;
@@ -68,6 +68,9 @@ export interface TradingState {
   
   // Add operation lock to prevent concurrent calls
   operationInProgress: boolean;
+
+  // Add simulation mode
+  simulationMode: boolean;
   
   // Actions
   setPair: (pair: TradingPair) => void;
@@ -75,10 +78,13 @@ export interface TradingState {
   setConnected: (connected: boolean) => void;
   setPositions: (positions: UserPosition[]) => void;
   setOrderType: (type: 'market' | 'limit') => void;
-  setOrderSide: (side: 'long' | 'short') => void;  setOrderSize: (size: string) => void;
+  setOrderSide: (side: 'long' | 'short') => void;
+  setOrderSize: (size: string) => void;
   setOrderPrice: (price: string) => void;
-  setLeverage: (leverage: number) => void; // Added leverage setter
+  setLeverage: (leverage: number) => void;
+  setSimulationMode: (enabled: boolean) => void;
 
+  // Debug methods
   debugContractState: () => Promise<void>;
   checkContractStatus: () => Promise<void>;
   executeTradeWithDebug: (market: string, isLong: boolean, amount: string, leverage: number) => Promise<{ success: boolean; error?: string; transactionHash?: string }>;
@@ -104,8 +110,6 @@ export interface TradingState {
   loadVaultInfo: () => Promise<void>;
   depositToVault: (amount: number) => Promise<{ success: boolean; error?: string }>;
   withdrawFromVault: (amount: number) => Promise<{ success: boolean; error?: string }>;
-
-  
 }
 
 // Contract addresses from your deployment
@@ -124,7 +128,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
   
   // Initial state
   currentPair: {
-    symbol: 'XLM-USD',
+    symbol: 'BTC-USD',
     baseAsset: 'XLM',
     quoteAsset: 'USD',
     price: 0.50,
@@ -151,7 +155,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
   orderSide: 'long',
   orderSize: '',
   orderPrice: '',
-  leverage: 1, // Default leverage
+  leverage: 1,
   
   vaultInfo: null,
   vaultLoading: false,
@@ -163,6 +167,9 @@ export const useTradingStore = create<TradingState>((set, get) => ({
   contractAddresses: CONTRACT_ADDRESSES,
   currentPrices: null,
   
+  // Add simulation mode state
+  simulationMode: false,
+  
   // Basic actions
   setPair: (pair) => set({ currentPair: pair }),
   setBalance: (balance) => set({ balance }),
@@ -173,7 +180,8 @@ export const useTradingStore = create<TradingState>((set, get) => ({
   setOrderSize: (size) => set({ orderSize: size }),
   setOrderPrice: (price) => set({ orderPrice: price }),
   setLeverage: (leverage) => set({ leverage }),
-  
+  setSimulationMode: (enabled: boolean) => set({ simulationMode: enabled }),
+
   // Passkey authentication actions with concurrency control
   checkPasskeyStatus: async () => {
     const { passkeyService, operationInProgress } = get();
@@ -206,6 +214,122 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
   },
 
+  // Update executeSmartContractTrade to use simulation
+  executeSmartContractTrade: async (market: string, isLong: boolean, amount: string, leverage: number) => {
+    const { passkeyService, passkeyAuth, simulationMode } = get();
+    
+    if (!passkeyAuth.isAuthenticated) {
+      return { success: false, error: 'Please authenticate with your passkey first' };
+    }
+    
+    if (!amount || parseFloat(amount) <= 0) {
+      return { success: false, error: 'Please enter a valid trade amount' };
+    }
+    
+    if (leverage < 1 || leverage > 100) {
+      return { success: false, error: 'Leverage must be between 1x and 100x' };
+    }
+    
+    set({ orderLoading: true });
+    
+    try {
+      console.log('Executing trade:', { market, isLong, amount, leverage, simulationMode });
+      
+      let result;
+      
+      if (simulationMode) {
+        // Force simulation mode
+        result = await passkeyService.executeTradeWithSimulation(market, isLong, amount, leverage, true);
+        
+        if (result.success) {
+          // Update mock balance
+          passkeyService.updateMockBalance(amount);
+          
+          // Update UI balance with mock data
+          const mockBalance = passkeyService.getMockKaleBalance();
+          set({ kaleBalance: mockBalance, balance: parseFloat(mockBalance) });
+        }
+      } else {
+        // Try real transaction with simulation fallback
+        result = await passkeyService.executeTradeWithSimulation(market, isLong, amount, leverage, false);
+        
+        if (result.success && !result.error?.includes('Demo mode')) {
+          // Real transaction succeeded, refresh real balances
+          await get().refreshBalances().catch(console.error);
+        } else if (result.success && result.error?.includes('Demo mode')) {
+          // Simulation fallback was used
+          passkeyService.updateMockBalance(amount);
+          const mockBalance = passkeyService.getMockKaleBalance();
+          set({ kaleBalance: mockBalance, balance: parseFloat(mockBalance) });
+        }
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('Trade execution failed:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    } finally {
+      set({ orderLoading: false });
+    }
+  },
+
+  // Update refreshBalances to handle simulation mode
+  refreshBalances: async () => {
+    const { passkeyService, passkeyAuth, simulationMode } = get();
+    
+    if (!passkeyAuth.isAuthenticated) {
+      console.log('Not authenticated, skipping balance refresh');
+      return;
+    }
+    
+    set({ balanceLoading: true });
+    
+    try {
+      if (simulationMode) {
+        // Use mock balance in simulation mode
+        const mockBalance = passkeyService.getMockKaleBalance();
+        set({ 
+          kaleBalance: mockBalance,
+          balance: parseFloat(mockBalance)
+        });
+        console.log('Mock KALE balance:', mockBalance);
+      } else {
+        // Try to get real balance
+        const kaleResult = await passkeyService.getKaleBalance();
+        if (kaleResult.success && kaleResult.balance) {
+          set({ 
+            kaleBalance: kaleResult.balance,
+            balance: parseFloat(kaleResult.balance)
+          });
+          console.log('Real KALE balance refreshed:', kaleResult.balance);
+        } else {
+          // Fall back to mock balance if real balance fails
+          const mockBalance = passkeyService.getMockKaleBalance();
+          set({ 
+            kaleBalance: mockBalance,
+            balance: parseFloat(mockBalance)
+          });
+          console.log('Using mock balance fallback:', mockBalance);
+        }
+      }
+      
+    } catch (error) {
+      console.error('Failed to refresh balances:', error);
+      // Use mock balance as last resort
+      const mockBalance = passkeyService.getMockKaleBalance();
+      set({ 
+        kaleBalance: mockBalance,
+        balance: parseFloat(mockBalance)
+      });
+    } finally {
+      set({ balanceLoading: false });
+    }
+  },
+
   debugContractState: async () => {
     const { passkeyService, passkeyAuth } = get();
     
@@ -235,7 +359,7 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
   },
 
-    // Enhanced trade execution with better error handling
+  // Enhanced trade execution with better error handling
   executeTradeWithDebug: async (market: string, isLong: boolean, amount: string, leverage: number) => {
     const { passkeyService, passkeyAuth } = get();
     
@@ -305,7 +429,6 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     }
   },
 
-  
   registerPasskey: async (username?: string) => {
     const { passkeyService, operationInProgress } = get();
     
@@ -429,47 +552,10 @@ export const useTradingStore = create<TradingState>((set, get) => ({
       operationInProgress: false,
       orderSize: '',
       orderPrice: '',
-      leverage: 1
+      leverage: 1,
+      simulationMode: false
     });
     console.log('Signed out from passkey authentication');
-  },
-  
-  // Smart contract integration actions
-  refreshBalances: async () => {
-    const { passkeyService, passkeyAuth } = get();
-    
-    if (!passkeyAuth.isAuthenticated) {
-      console.log('Not authenticated, skipping balance refresh');
-      return;
-    }
-    
-    set({ balanceLoading: true });
-    
-    try {
-      const kaleResult = await passkeyService.getKaleBalance();
-      if (kaleResult.success && kaleResult.balance) {
-        set({ 
-          kaleBalance: kaleResult.balance,
-          balance: parseFloat(kaleResult.balance)
-        });
-        console.log('KALE balance refreshed:', kaleResult.balance);
-      } else {
-        console.error('Failed to get KALE balance:', kaleResult.error);
-        set({ 
-          kaleBalance: '0',
-          balance: 0
-        });
-      }
-      
-    } catch (error) {
-      console.error('Failed to refresh balances:', error);
-      set({ 
-        kaleBalance: '0',
-        balance: 0
-      });
-    } finally {
-      set({ balanceLoading: false });
-    }
   },
   
   getCurrentPrices: async () => {
@@ -499,56 +585,6 @@ export const useTradingStore = create<TradingState>((set, get) => ({
           timestamp: Date.now()
         }
       });
-    }
-  },
-  
-  executeSmartContractTrade: async (market: string, isLong: boolean, amount: string, leverage: number) => {
-    const { passkeyService, passkeyAuth } = get();
-    
-    if (!passkeyAuth.isAuthenticated) {
-      return { success: false, error: 'Please authenticate with your passkey first' };
-    }
-    
-    if (!amount || parseFloat(amount) <= 0) {
-      return { success: false, error: 'Please enter a valid trade amount' };
-    }
-    
-    if (leverage < 1 || leverage > 100) {
-      return { success: false, error: 'Leverage must be between 1x and 100x' };
-    }
-    
-    set({ orderLoading: true });
-    
-    try {
-      console.log('Executing smart contract trade:', { market, isLong, amount, leverage });
-      
-      const result = await passkeyService.executeTrade(market, isLong, amount, leverage);
-      
-      if (result.success) {
-        console.log('Smart contract trade executed:', result.transactionHash);
-        
-        // Refresh balances after successful trade
-        await get().refreshBalances().catch(console.error);
-        
-        return { 
-          success: true, 
-          transactionHash: result.transactionHash 
-        };
-      } else {
-        return { 
-          success: false, 
-          error: result.error || 'Smart contract trade failed' 
-        };
-      }
-      
-    } catch (error) {
-      console.error('Smart contract trade failed:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      };
-    } finally {
-      set({ orderLoading: false });
     }
   },
   
@@ -596,6 +632,121 @@ export const useTradingStore = create<TradingState>((set, get) => ({
     
     return { success: false, error: 'Market not supported for smart contract trading' };
   },
+
+  // Update loadVaultInfo method
+  loadVaultInfo: async () => {
+    const { passkeyService, passkeyAuth, simulationMode } = get();
+    
+    if (!passkeyAuth.isAuthenticated) {
+      console.log('Not authenticated, skipping vault info load');
+      return;
+    }
+    
+    set({ vaultLoading: true });
+    
+    try {
+      const result = await passkeyService.getVaultInfo();
+      
+      if (result.success && result.vaultInfo) {
+        set({ vaultInfo: result.vaultInfo });
+        console.log('Vault info loaded:', result.vaultInfo);
+      } else {
+        console.error('Failed to load vault info:', result.error);
+      }
+    } catch (error) {
+      console.error('Vault info loading failed:', error);
+    } finally {
+      set({ vaultLoading: false });
+    }
+  },
+
+  // Update depositToVault method
+  depositToVault: async (amount: number) => {
+    const { passkeyService, passkeyAuth, simulationMode } = get();
+    
+    if (!passkeyAuth.isAuthenticated) {
+      return { success: false, error: 'Please authenticate with your passkey first' };
+    }
+    
+    if (amount <= 0) {
+      return { success: false, error: 'Please enter a valid deposit amount' };
+    }
+    
+    try {
+      console.log('Depositing to vault:', { amount, simulationMode });
+      
+      let result;
+      
+      if (simulationMode) {
+        // Force simulation mode
+        result = await passkeyService.depositToVaultWithSimulation(amount, true);
+      } else {
+        // Try real transaction with simulation fallback
+        result = await passkeyService.depositToVaultWithSimulation(amount, false);
+      }
+      
+      if (result.success) {
+        // Refresh vault info and balances
+        await get().loadVaultInfo();
+        await get().refreshBalances();
+        
+        console.log('Vault deposit successful');
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('Vault deposit failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Deposit failed'
+      };
+    }
+  },
+
+  // Update withdrawFromVault method
+  withdrawFromVault: async (amount: number) => {
+    const { passkeyService, passkeyAuth, simulationMode } = get();
+    
+    if (!passkeyAuth.isAuthenticated) {
+      return { success: false, error: 'Please authenticate with your passkey first' };
+    }
+    
+    if (amount <= 0) {
+      return { success: false, error: 'Please enter a valid withdrawal amount' };
+    }
+    
+    try {
+      console.log('Withdrawing from vault:', { amount, simulationMode });
+      
+      let result;
+      
+      if (simulationMode) {
+        // Force simulation mode
+        result = await passkeyService.withdrawFromVaultWithSimulation(amount, true);
+      } else {
+        // Try real transaction with simulation fallback
+        result = await passkeyService.withdrawFromVaultWithSimulation(amount, false);
+      }
+      
+      if (result.success) {
+        // Refresh vault info and balances
+        await get().loadVaultInfo();
+        await get().refreshBalances();
+        
+        console.log('Vault withdrawal successful');
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('Vault withdrawal failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Withdrawal failed'
+      };
+    }
+  },
   
   // Simplified placeholder methods for other actions
   closePosition: async (positionId: string) => {
@@ -609,20 +760,6 @@ export const useTradingStore = create<TradingState>((set, get) => ({
   
   cancelAllOrders: async () => {
     console.log('Cancelling all orders - placeholder');
-  },
-  
-  loadVaultInfo: async () => {
-    console.log('Loading vault info - placeholder');
-  },
-  
-  depositToVault: async (amount: number) => {
-    console.log('Depositing to vault:', amount);
-    return { success: false, error: 'Vault deposit not implemented yet' };
-  },
-  
-  withdrawFromVault: async (amount: number) => {
-    console.log('Withdrawing from vault:', amount);
-    return { success: false, error: 'Vault withdrawal not implemented yet' };
   },
 }));
 

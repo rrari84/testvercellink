@@ -48,7 +48,6 @@ export function Header() {
             <span className="font-semibold text-foreground text-sm">
               {currentPair.symbol}
             </span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </div>
         </div>
 

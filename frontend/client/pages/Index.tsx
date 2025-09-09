@@ -78,26 +78,6 @@ export default function Index() {
                   </div>
                 </div>
                 
-                {/* Collateral Info */}
-                <div className="mt-4 pt-4 border-t border-border">
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <div className="text-xs text-muted-foreground uppercase tracking-wide">KALE Price</div>
-                      <div className="font-mono text-sm font-medium text-foreground">$0.0450</div>
-                      <div className="text-xs text-positive">+1.2%</div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-xs text-muted-foreground uppercase tracking-wide">Collateral Rate</div>
-                      <div className="font-mono text-sm font-medium text-purple-400">22.22 KALE = $1</div>
-                      <div className="text-xs text-muted-foreground">Updated 2s ago</div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="text-xs text-muted-foreground uppercase tracking-wide">Total Value Locked</div>
-                      <div className="font-mono text-sm font-medium text-foreground">$45.2M</div>
-                      <div className="text-xs text-muted-foreground">1.003B KALE</div>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

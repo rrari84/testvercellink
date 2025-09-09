@@ -12,6 +12,7 @@ export function VaultPanel() {
     vaultLoading,
     isConnected,
     balance,
+    simulationMode,
     loadVaultInfo,
     depositToVault,
     withdrawFromVault
@@ -177,6 +178,18 @@ export function VaultPanel() {
         </div>
       </div>
 
+  {simulationMode && (
+    <div className="bg-orange-50 border border-orange-200 rounded p-3">
+      <div className="flex items-center space-x-2">
+        <div className="h-2 w-2 bg-orange-500 rounded-full" />
+        <span className="text-sm font-medium text-orange-700">Demo Mode Active</span>
+      </div>
+      <p className="text-xs text-orange-600 mt-1">
+        All vault transactions are simulated for demonstration purposes
+      </p>
+    </div>
+  )}
+
       {/* Deposit/Withdraw Form */}
       <div className="bg-card border border-border rounded">
         <div className="p-4 border-b border-border">
@@ -251,19 +264,23 @@ export function VaultPanel() {
                 )}
 
                 <Button
-                  onClick={handleDeposit}
-                  disabled={!isConnected || loading || !depositAmount || parseFloat(depositAmount) <= 0 || parseFloat(depositAmount) > balance}
-                  className="w-full h-9 text-xs font-medium bg-buy hover:bg-buy/90 text-white"
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
-                      Depositing...
-                    </>
-                  ) : (
-                    `Deposit ${depositAmount || '0'} USD`
-                  )}
-                </Button>
+    onClick={handleDeposit}
+    disabled={!isConnected || loading || !depositAmount || parseFloat(depositAmount) <= 0 || parseFloat(depositAmount) > balance}
+    className="w-full h-9 text-xs font-medium bg-buy hover:bg-buy/90 text-white"
+  >
+    {loading ? (
+      <>
+        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
+        {simulationMode ? 'Simulating...' : 'Depositing...'}
+      </>
+    ) : (
+      <>
+        {simulationMode && '🎭 '}
+        Deposit {depositAmount || '0'} USD
+        {simulationMode && ' (Demo)'}
+      </>
+    )}
+  </Button>
               </div>
             </TabsContent>
 
@@ -318,19 +335,23 @@ export function VaultPanel() {
                 )}
 
                 <Button
-                  onClick={handleWithdraw}
-                  disabled={!isConnected || loading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > getMaxWithdraw()}
-                  className="w-full h-9 text-xs font-medium bg-sell hover:bg-sell/90 text-white"
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
-                      Withdrawing...
-                    </>
-                  ) : (
-                    `Withdraw ${withdrawAmount || '0'} USD`
-                  )}
-                </Button>
+    onClick={handleWithdraw}
+    disabled={!isConnected || loading || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > getMaxWithdraw()}
+    className="w-full h-9 text-xs font-medium bg-sell hover:bg-sell/90 text-white"
+  >
+    {loading ? (
+      <>
+        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
+        {simulationMode ? 'Simulating...' : 'Withdrawing...'}
+      </>
+    ) : (
+      <>
+        {simulationMode && '🎭 '}
+        Withdraw {withdrawAmount || '0'} USD
+        {simulationMode && ' (Demo)'}
+      </>
+    )}
+  </Button>
               </div>
             </TabsContent>
           </Tabs>

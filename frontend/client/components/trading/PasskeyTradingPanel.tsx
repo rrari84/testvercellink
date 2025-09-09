@@ -19,6 +19,7 @@ export function PasskeyTradingPanel() {
     orderPrice,
     leverage,
     orderLoading,
+    simulationMode,
     setOrderType,
     setOrderSide,
     setOrderSize,
@@ -31,6 +32,7 @@ export function PasskeyTradingPanel() {
     authenticateWithPasskey,
     registerPasskey,
     signOutPasskey,
+    setSimulationMode,
     refreshBalances,
     // Add these if they exist in your store
     debugContractState,
@@ -307,29 +309,91 @@ export function PasskeyTradingPanel() {
         </div>
       )}
 
-      {/* Last Transaction */}
-      {lastTxHash && (
-        <div className="bg-green-50 border border-green-200 rounded p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className="h-2 w-2 bg-green-500 rounded-full" />
-              <span className="text-sm font-medium text-green-700">Transaction Successful</span>
-            </div>
-            <a
-              href={`https://stellar.expert/explorer/testnet/tx/${lastTxHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-green-600 hover:text-green-800 flex items-center space-x-1"
-            >
-              <span>View on Explorer</span>
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-          <p className="text-xs text-green-600 font-mono mt-1">
-            {formatAddress(lastTxHash)}
-          </p>
+      {/* Simulation Mode Toggle */}
+{isConnected && (
+  <div className="bg-card border border-border rounded p-4">
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="flex items-center space-x-2">
+          <div className={`h-2 w-2 rounded-full ${simulationMode ? 'bg-orange-500' : 'bg-blue-500'}`} />
+          <span className="text-sm font-medium">
+            {simulationMode ? 'Demo Mode' : 'Live Trading'}
+          </span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          {simulationMode 
+            ? 'Simulated transactions for demonstration' 
+            : 'Real transactions on Stellar testnet'
+          }
+        </p>
+      </div>
+      <Button
+        onClick={() => setSimulationMode(!simulationMode)}
+        variant={simulationMode ? "default" : "outline"}
+        size="sm"
+      >
+        {simulationMode ? 'Exit Demo' : 'Demo Mode'}
+      </Button>
+    </div>
+    
+    {simulationMode && (
+      <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded text-xs">
+        <div className="flex items-center space-x-1 text-orange-600 font-medium mb-1">
+          <AlertTriangle className="h-3 w-3" />
+          <span>Demo Mode Active</span>
+        </div>
+        <div className="text-orange-700">
+          <div>• All transactions are simulated</div>
+          <div>• No real blockchain interaction</div>
+          <div>• Perfect for testing and demonstrations</div>
+        </div>
+      </div>
+    )}
+  </div>
+)}
+
+
+
+      {/* Last Transaction - Updated */}
+{lastTxHash && (
+  <div className={`border rounded p-3 ${
+    simulationMode ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'
+  }`}>
+    <div className="flex items-center justify-between">
+      <div className="flex items-center space-x-2">
+        <div className={`h-2 w-2 rounded-full ${
+          simulationMode ? 'bg-orange-500' : 'bg-green-500'
+        }`} />
+        <span className={`text-sm font-medium ${
+          simulationMode ? 'text-orange-700' : 'text-green-700'
+        }`}>
+          {simulationMode ? 'Demo Transaction' : 'Transaction Successful'}
+        </span>
+      </div>
+      {!simulationMode && (
+        <a
+          href={`https://stellar.expert/explorer/testnet/tx/${lastTxHash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-green-600 hover:text-green-800 flex items-center space-x-1"
+        >
+          <span>View on Explorer</span>
+          <ExternalLink className="h-3 w-3" />
+        </a>
       )}
+    </div>
+    <p className={`text-xs font-mono mt-1 ${
+      simulationMode ? 'text-orange-600' : 'text-green-600'
+    }`}>
+      {simulationMode && '🎭 '}{formatAddress(lastTxHash)}
+    </p>
+    {simulationMode && (
+      <p className="text-xs text-orange-600 mt-1">
+        This is a transaction for demonstration purposes
+      </p>
+    )}
+  </div>
+)}
 
       {/* Trading Form */}
       <div className="bg-card border border-border rounded">
@@ -423,91 +487,8 @@ export function PasskeyTradingPanel() {
         </div>
       </div>
 
-      {/* Positions */}
-      {isConnected && (
-        <div className="bg-card border border-border rounded">
-          <div className="p-4 border-b border-border">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium text-foreground">Open Positions</h3>
-              {positionsLoading && (
-                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
-              )}
-            </div>
-          </div>
-          <div className="p-4">
-            {positions.length === 0 ? (
-              <div className="text-center py-6">
-                <p className="text-xs text-muted-foreground">No open positions</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {positions.map((position) => (
-                  <div key={position.id} className="bg-surface rounded p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-medium text-sm text-foreground">{position.symbol}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${
-                          position.side === 'long' ? 'bg-buy/10 text-buy' : 'bg-sell/10 text-sell'
-                        }`}>
-                          {position.side.toUpperCase()}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded text-xs bg-primary/10 text-primary">
-                          {leverage}x
-                        </span>
-                      </div>
-                      <Button
-                        onClick={() => handleClosePosition(position.id)}
-                        disabled={closingPosition === position.id}
-                        size="sm"
-                        variant="outline"
-                        className="h-6 w-6 p-0 hover:bg-sell/10 hover:text-sell hover:border-sell/20"
-                      >
-                        {closingPosition === position.id ? (
-                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current" />
-                        ) : (
-                          <X className="h-3 w-3" />
-                        )}
-                      </Button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <span className="text-muted-foreground">Size:</span>
-                        <div className="font-mono text-foreground">{position.size}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Entry:</span>
-                        <div className="font-mono text-foreground">${position.entryPrice.toFixed(4)}</div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Liq. Price:</span>
-                        <div className="font-mono text-red-400">
-                          ${calculateLiquidationPrice(position.entryPrice, leverage, position.side).toFixed(4)}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">P&L:</span>
-                        <div className={`font-mono font-medium flex items-center space-x-1 ${
-                          position.unrealizedPnl >= 0 ? 'text-positive' : 'text-sell'
-                        }`}>
-                          {position.unrealizedPnl >= 0 ? (
-                            <TrendingUp className="h-3 w-3" />
-                          ) : (
-                            <TrendingDown className="h-3 w-3" />
-                          )}
-                          <span>
-                            {position.unrealizedPnl >= 0 ? '+' : ''}${position.unrealizedPnl.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      
+      
     </div>
   );
 }
@@ -535,6 +516,7 @@ interface OrderFormProps {
   onCheckContractStatus: () => void;
 }
 
+
 function OrderForm({
   side,
   orderType,
@@ -557,6 +539,8 @@ function OrderForm({
   onDebugContract,
   onCheckContractStatus
 }: OrderFormProps) {
+  const { simulationMode } = useTradingStore(); // Add this to access simulation mode
+  
   const liquidationPrice = orderSize ? 
     (side === 'long' ? currentPrice - (currentPrice / leverage) : currentPrice + (currentPrice / leverage)) : 0;
 
@@ -696,8 +680,29 @@ function OrderForm({
         )}
       </div>
 
-            
-
-        
-        </div>
-      )};
+      {/* Submit Button */}
+      <Button
+        onClick={onSubmit}
+        disabled={!isConnected || loading || !orderSize || parseFloat(orderSize) <= 0}
+        className={`w-full h-9 text-xs font-medium ${
+          side === 'long' 
+            ? 'bg-buy hover:bg-buy/90 text-white' 
+            : 'bg-sell hover:bg-sell/90 text-white'
+        }`}
+      >
+        {loading ? (
+          <>
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
+            {simulationMode ? 'Submitting...' : 'Submitting to Testnet...'}
+          </>
+        ) : (
+          <>
+            {simulationMode && '🎭 '}
+            {side === 'long' ? 'Open Long' : 'Open Short'} {orderSize || '0'} {leverage}x
+            {simulationMode && ' (Demo)'}
+          </>
+        )}
+      </Button>
+    </div>
+  );
+}
