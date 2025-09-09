@@ -1,12 +1,21 @@
 {
-  "buildCommand": "cd frontend && npm run build:client",
-  "outputDirectory": "frontend/dist/spa",
-  "installCommand": "cd frontend && npm install",
-  "framework": "vite",
-  "rewrites": [
+"builds": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist/spa"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/dist/spa/$1"
+    },
+    {
+      "src": "/",
+      "dest": "/frontend/dist/spa/index.html"
     }
   ]
 }
